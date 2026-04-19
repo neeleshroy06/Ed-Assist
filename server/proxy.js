@@ -45,15 +45,26 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '100mb' }))
 app.use(express.urlencoded({ extended: true, limit: '100mb' }))
 
-let sessionContext = {
-  transcript: '',
-  handwrittenNotesText: '',
-  typedNotes: '',
-  pdfBase64: null,
-  pdfMimeType: 'application/pdf',
-  chapters: [],
-  voiceId: process.env.ELEVENLABS_VOICE_ID || '',
+function createEmptySessionContext() {
+  return {
+    transcript: '',
+    transcriptSegments: [],
+    handwrittenNotesText: '',
+    typedNotes: '',
+    pdfBase64: null,
+    pdfMimeType: 'application/pdf',
+    chapters: [],
+    voiceId: process.env.ELEVENLABS_VOICE_ID || '',
+    annotationEvents: [],
+    annotatedDocument: null,
+    lectureMemory: [],
+    lectureStatus: 'idle',
+    documentName: '',
+    publishedAt: null,
+  }
 }
+
+let sessionContext = createEmptySessionContext()
 
 function cleanupUpload(file) {
   if (file?.path) {
@@ -89,6 +100,280 @@ function getGemmaEndpoint() {
 
 function extractTextCandidate(data) {
   return data?.candidates?.[0]?.content?.parts?.map((part) => part.text || '').join('').trim() || ''
+}
+
+function parseJsonCandidate(raw, fallback = null) {
+  if (!raw) return fallback
+  const cleaned = String(raw).replace(/```json|```/g, '').trim()
+  try {
+    return JSON.parse(cleaned)
+  } catch {
+    return fallback
+  }
+}
+
+function formatLectureMemoryForPrompt(entries = []) {
+  if (!entries.length) return '(none)'
+  return entries
+    .slice(0, 18)
+    .map((entry, index) => {
+      const timestamp = typeof entry.timestamp === 'number' ? `${Math.round(entry.timestamp / 1000)}s` : 'unknown'
+      return `${index + 1}. [${timestamp}] page ${entry.page || '?'} - ${entry.summary || entry.annotation || ''}`.trim()
+    })
+    .join('\n')
+}
+
+function normalizeNumberish(value, fallback = 0) {
+  const num = Number(value)
+  return Number.isFinite(num) ? num : fallback
+}
+
+function splitTranscriptSentences(text = '') {
+  return String(text)
+    .split(/(?<=[.!?])\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+}
+
+function buildSegmentsFromWords(words = []) {
+  if (!words.length) return []
+  const segments = []
+  let current = null
+
+  for (const rawWord of words) {
+    const text = String(rawWord.text || rawWord.word || '').trim()
+    if (!text) continue
+    const startMs = Math.round(normalizeNumberish(rawWord.start, 0) * 1000)
+    const endMs = Math.round(normalizeNumberish(rawWord.end, rawWord.start) * 1000)
+    if (!current) {
+      current = { startMs, endMs, text }
+    } else {
+      current.text += `${/^[,.;!?]/.test(text) ? '' : ' '}${text}`
+      current.endMs = endMs
+    }
+
+    const shouldClose = /[.!?]$/.test(text) || current.text.split(/\s+/).length >= 18 || current.endMs - current.startMs >= 9000
+    if (shouldClose) {
+      segments.push(current)
+      current = null
+    }
+  }
+
+  if (current) segments.push(current)
+  return segments
+}
+
+function buildSegmentsFromTranscriptText(text = '', durationMs = 0) {
+  const sentences = splitTranscriptSentences(text)
+  if (!sentences.length) return []
+  const totalDuration = Math.max(durationMs, sentences.length * 4000)
+  const slice = totalDuration / sentences.length
+  return sentences.map((sentence, index) => ({
+    startMs: Math.round(index * slice),
+    endMs: Math.round((index + 1) * slice),
+    text: sentence,
+  }))
+}
+
+function normalizeTranscriptSegments(payload, durationMs = 0) {
+  const directSegments = Array.isArray(payload?.segments) ? payload.segments : Array.isArray(payload?.words) ? buildSegmentsFromWords(payload.words) : []
+  if (directSegments.length) {
+    return directSegments
+      .map((segment, index) => ({
+        id: segment.id || `seg-${index + 1}`,
+        startMs: Math.max(0, Math.round(normalizeNumberish(segment.startMs ?? segment.start, 0) * (segment.startMs == null ? 1000 : 1))),
+        endMs: Math.max(0, Math.round(normalizeNumberish(segment.endMs ?? segment.end, 0) * (segment.endMs == null ? 1000 : 1))),
+        text: String(segment.text || '').trim(),
+      }))
+      .filter((segment) => segment.text)
+  }
+  return buildSegmentsFromTranscriptText(payload?.text || payload?.transcript || '', durationMs).map((segment, index) => ({
+    id: `seg-${index + 1}`,
+    ...segment,
+  }))
+}
+
+function normalizeBounds(bounds = {}) {
+  return {
+    x: normalizeNumberish(bounds.x, 0),
+    y: normalizeNumberish(bounds.y, 0),
+    width: normalizeNumberish(bounds.width, 0),
+    height: normalizeNumberish(bounds.height, 0),
+  }
+}
+
+function mergeBounds(boundsList = []) {
+  if (!boundsList.length) return { x: 0, y: 0, width: 0, height: 0 }
+  const left = Math.min(...boundsList.map((bounds) => bounds.x))
+  const top = Math.min(...boundsList.map((bounds) => bounds.y))
+  const right = Math.max(...boundsList.map((bounds) => bounds.x + bounds.width))
+  const bottom = Math.max(...boundsList.map((bounds) => bounds.y + bounds.height))
+  return {
+    x: left,
+    y: top,
+    width: Math.max(0, right - left),
+    height: Math.max(0, bottom - top),
+  }
+}
+
+function formatAnnotationAction(stroke) {
+  const nearbyText = Array.isArray(stroke.nearbyText) ? stroke.nearbyText.filter(Boolean).slice(0, 5).join(' ') : ''
+  if (nearbyText) {
+    return stroke.tool === 'highlighter' ? `highlighted "${nearbyText}"` : `drew near "${nearbyText}"`
+  }
+  return stroke.tool === 'highlighter' ? 'highlighted a page region' : 'drew on a page region'
+}
+
+function groupAnnotationEvents(annotationEvents = []) {
+  const normalized = annotationEvents
+    .map((event, index) => ({
+      id: event.id || `annotation-${index + 1}`,
+      page: Number(event.page) || 1,
+      tool: event.tool === 'highlighter' ? 'highlighter' : 'pen',
+      points: Array.isArray(event.points) ? event.points : [],
+      startedAtMs: Math.max(0, Math.round(normalizeNumberish(event.startedAtMs, 0))),
+      endedAtMs: Math.max(0, Math.round(normalizeNumberish(event.endedAtMs, event.startedAtMs))),
+      nearbyText: Array.isArray(event.nearbyText) ? event.nearbyText.filter(Boolean) : [],
+      bounds: normalizeBounds(event.bounds),
+      annotationLabel: String(event.annotationLabel || '').trim(),
+    }))
+    .sort((left, right) => left.startedAtMs - right.startedAtMs)
+
+  const groups = []
+  const gapMs = 7000
+  for (const stroke of normalized) {
+    const previous = groups[groups.length - 1]
+    if (previous && previous.page === stroke.page && stroke.startedAtMs - previous.endedAtMs <= gapMs) {
+      previous.events.push(stroke)
+      previous.endedAtMs = Math.max(previous.endedAtMs, stroke.endedAtMs)
+      continue
+    }
+    groups.push({
+      page: stroke.page,
+      startedAtMs: stroke.startedAtMs,
+      endedAtMs: stroke.endedAtMs,
+      events: [stroke],
+    })
+  }
+
+  return groups.map((group, index) => {
+    const bounds = mergeBounds(group.events.map((event) => event.bounds))
+    const nearbyText = [...new Set(group.events.flatMap((event) => event.nearbyText || []))].slice(0, 8)
+    const actionSummary = group.events
+      .map((event) => event.annotationLabel || formatAnnotationAction(event))
+      .filter(Boolean)
+      .join('; ')
+    return {
+      id: `moment-${index + 1}`,
+      timestamp: group.startedAtMs,
+      page: group.page,
+      startedAtMs: group.startedAtMs,
+      endedAtMs: group.endedAtMs,
+      bounds,
+      nearbyText,
+      annotation: actionSummary || 'Professor annotated this page region.',
+      eventCount: group.events.length,
+      tools: [...new Set(group.events.map((event) => event.tool))],
+    }
+  })
+}
+
+function overlapDuration(startA, endA, startB, endB) {
+  return Math.max(0, Math.min(endA, endB) - Math.max(startA, startB))
+}
+
+function attachTranscriptToMoments(moments = [], transcriptSegments = []) {
+  return moments.map((moment) => {
+    const windowStart = Math.max(0, moment.startedAtMs - 7000)
+    const windowEnd = moment.endedAtMs + 7000
+    const overlapping = transcriptSegments.filter((segment) => {
+      const segmentStart = normalizeNumberish(segment.startMs, 0)
+      const segmentEnd = normalizeNumberish(segment.endMs, segmentStart)
+      return overlapDuration(windowStart, windowEnd, segmentStart, segmentEnd) > 0
+    })
+    const excerpt = overlapping.map((segment) => segment.text).join(' ').trim()
+    return {
+      ...moment,
+      transcript: excerpt,
+    }
+  })
+}
+
+function fallbackLectureMemory(moments = []) {
+  return moments.map((moment) => ({
+    timestamp: moment.timestamp,
+    transcript: moment.transcript || '',
+    annotation: moment.annotation,
+    page: moment.page,
+    summary: moment.transcript
+      ? `Professor likely emphasized ${moment.transcript.slice(0, 180)}`
+      : `Professor annotated page ${moment.page}.`,
+  }))
+}
+
+async function generateLectureMemoryWithGemma(moments = [], transcript = '') {
+  if (!moments.length) return []
+  if (!GEMINI_API_KEY?.trim()) {
+    return fallbackLectureMemory(moments)
+  }
+
+  const prompt = `You are converting a lecture transcript plus timestamped document annotations into structured lecture memory.
+
+Return a JSON array only. Each array item must have exactly these keys:
+- timestamp
+- transcript
+- annotation
+- page
+- summary
+
+The summary should be 1 sentence explaining what the professor was likely emphasizing at that moment.
+Do not invent details beyond the transcript and annotation context.
+
+Lecture transcript:
+${transcript.slice(0, 24000)}
+
+Annotation moments:
+${JSON.stringify(
+    moments.map((moment) => ({
+      timestamp: moment.timestamp,
+      page: moment.page,
+      annotation: moment.annotation,
+      nearbyText: moment.nearbyText,
+      transcript: moment.transcript,
+    })),
+    null,
+    2,
+  )}`
+
+  try {
+    const response = await axios.post(
+      getGemmaEndpoint(),
+      {
+        contents: [
+          {
+            parts: [{ text: prompt }],
+          },
+        ],
+      },
+      {
+        headers: { 'Content-Type': 'application/json' },
+      },
+    )
+    const parsed = parseJsonCandidate(extractTextCandidate(response.data), [])
+    if (!Array.isArray(parsed) || !parsed.length) {
+      return fallbackLectureMemory(moments)
+    }
+    return parsed.map((entry, index) => ({
+      timestamp: Math.max(0, Math.round(normalizeNumberish(entry.timestamp, moments[index]?.timestamp || 0))),
+      transcript: String(entry.transcript || moments[index]?.transcript || '').trim(),
+      annotation: String(entry.annotation || moments[index]?.annotation || '').trim(),
+      page: Number(entry.page) || moments[index]?.page || 1,
+      summary: String(entry.summary || '').trim() || fallbackLectureMemory([moments[index]])[0].summary,
+    }))
+  } catch (error) {
+    console.error('Lecture memory generation failed:', error.response?.data || error.message)
+    return fallbackLectureMemory(moments)
+  }
 }
 
 function parseChapterArray(raw) {
@@ -186,7 +471,9 @@ ${compactSection('Lecture transcript', sessionContext.transcript)}
 
 ${compactSection('Typed notes', sessionContext.typedNotes, '(none)', 6000)}
 
-${compactSection('Handwritten notes', sessionContext.handwrittenNotesText, '(none)', 6000)}`
+${compactSection('Handwritten notes', sessionContext.handwrittenNotesText, '(none)', 6000)}
+
+${compactSection('Lecture memory', formatLectureMemoryForPrompt(sessionContext.lectureMemory), '(none)', 6000)}`
 }
 
 app.post('/api/transcribe', upload.single('audio'), async (req, res) => {
@@ -203,6 +490,7 @@ app.post('/api/transcribe', upload.single('audio'), async (req, res) => {
 
   try {
     const formData = new FormData()
+    const durationMs = Math.max(0, Math.round(normalizeNumberish(req.body?.durationMs, 0)))
     formData.append('file', fs.createReadStream(req.file.path), {
       filename: req.file.originalname || 'lecture.webm',
       contentType: req.file.mimetype || 'audio/webm',
@@ -219,7 +507,8 @@ app.post('/api/transcribe', upload.single('audio'), async (req, res) => {
     })
 
     const transcript = response.data?.text || response.data?.transcript || ''
-    res.json({ transcript })
+    const segments = normalizeTranscriptSegments(response.data, durationMs)
+    res.json({ transcript, segments })
   } catch (error) {
     console.error('Transcription error:', error.response?.data || error.message)
     const message = messageFromUpstream(error)
@@ -313,6 +602,66 @@ app.post('/api/clone-voice', upload.single('audio'), async (req, res) => {
   }
 })
 
+app.post('/api/process-lecture', async (req, res) => {
+  const transcript = String(req.body?.transcript || '').trim()
+  const transcriptSegments = normalizeTranscriptSegments(
+    {
+      transcript,
+      segments: Array.isArray(req.body?.transcriptSegments) ? req.body.transcriptSegments : [],
+    },
+    normalizeNumberish(req.body?.lectureDurationMs, 0),
+  )
+  const annotationEvents = Array.isArray(req.body?.annotationEvents) ? req.body.annotationEvents : []
+  const pdfBase64 = req.body?.pdfBase64 || null
+  const pdfMimeType = req.body?.pdfMimeType || 'application/pdf'
+  const pageCount = Math.max(0, Number(req.body?.pageCount) || 0)
+  const documentName = String(req.body?.documentName || '').trim()
+
+  if (!transcript) {
+    return res.status(400).json({ message: 'A lecture transcript is required before processing.' })
+  }
+
+  if (!pdfBase64) {
+    return res.status(400).json({ message: 'Upload a lecture PDF before publishing the lecture package.' })
+  }
+
+  try {
+    const annotationMoments = attachTranscriptToMoments(groupAnnotationEvents(annotationEvents), transcriptSegments)
+    const lectureMemory = await generateLectureMemoryWithGemma(annotationMoments, transcript)
+
+    sessionContext.transcript = transcript
+    sessionContext.transcriptSegments = transcriptSegments
+    sessionContext.pdfBase64 = pdfBase64
+    sessionContext.pdfMimeType = pdfMimeType
+    sessionContext.annotationEvents = annotationEvents
+    sessionContext.annotatedDocument = {
+      type: 'overlay_annotations',
+      pageCount,
+      sourcePdfMimeType: pdfMimeType,
+      annotationCount: annotationEvents.length,
+    }
+    sessionContext.lectureMemory = lectureMemory
+    sessionContext.lectureStatus = 'published'
+    sessionContext.documentName = documentName
+    sessionContext.publishedAt = new Date().toISOString()
+
+    await detectChaptersAsync(transcript)
+
+    res.json({
+      ok: true,
+      status: sessionContext.lectureStatus,
+      lectureMemory,
+      annotationMoments,
+      publishedAt: sessionContext.publishedAt,
+    })
+  } catch (error) {
+    console.error('Process lecture error:', error.response?.data || error.message)
+    res.status(500).json({
+      message: error?.message || 'Unable to process the lecture package.',
+    })
+  }
+})
+
 app.post('/api/set-context', async (req, res) => {
   const body = req.body || {}
   const previousTranscript = sessionContext.transcript
@@ -321,6 +670,9 @@ app.post('/api/set-context', async (req, res) => {
   // sync independently (e.g. PDF upload alone, or transcript alone).
   if (Object.prototype.hasOwnProperty.call(body, 'transcript')) {
     sessionContext.transcript = body.transcript || ''
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'transcriptSegments')) {
+    sessionContext.transcriptSegments = Array.isArray(body.transcriptSegments) ? body.transcriptSegments : []
   }
   if (Object.prototype.hasOwnProperty.call(body, 'handwrittenNotesText')) {
     sessionContext.handwrittenNotesText = body.handwrittenNotesText || ''
@@ -335,24 +687,34 @@ app.post('/api/set-context', async (req, res) => {
   if (Object.prototype.hasOwnProperty.call(body, 'voiceId')) {
     sessionContext.voiceId = body.voiceId || sessionContext.voiceId || ''
   }
+  if (Object.prototype.hasOwnProperty.call(body, 'annotationEvents')) {
+    sessionContext.annotationEvents = Array.isArray(body.annotationEvents) ? body.annotationEvents : []
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'annotatedDocument')) {
+    sessionContext.annotatedDocument = body.annotatedDocument || null
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'lectureMemory')) {
+    sessionContext.lectureMemory = Array.isArray(body.lectureMemory) ? body.lectureMemory : []
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'lectureStatus')) {
+    sessionContext.lectureStatus = body.lectureStatus || sessionContext.lectureStatus || 'idle'
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'documentName')) {
+    sessionContext.documentName = body.documentName || ''
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'publishedAt')) {
+    sessionContext.publishedAt = body.publishedAt || null
+  }
 
   if (sessionContext.transcript && sessionContext.transcript !== previousTranscript) {
-    detectChaptersAsync(sessionContext.transcript)
+    await detectChaptersAsync(sessionContext.transcript)
   }
 
   res.json({ ok: true })
 })
 
 app.post('/api/clear-context', (_req, res) => {
-  sessionContext = {
-    transcript: '',
-    handwrittenNotesText: '',
-    typedNotes: '',
-    pdfBase64: null,
-    pdfMimeType: 'application/pdf',
-    chapters: [],
-    voiceId: process.env.ELEVENLABS_VOICE_ID || '',
-  }
+  sessionContext = createEmptySessionContext()
   res.json({ ok: true })
 })
 
@@ -363,8 +725,15 @@ app.get('/api/context', (_req, res) => {
     pdfMimeType: sessionContext.pdfMimeType,
     chapters: sessionContext.chapters,
     transcript: sessionContext.transcript,
+    transcriptSegments: sessionContext.transcriptSegments,
     typedNotes: sessionContext.typedNotes,
     handwrittenNotesText: sessionContext.handwrittenNotesText,
+    annotationEvents: sessionContext.annotationEvents,
+    annotatedDocument: sessionContext.annotatedDocument,
+    lectureMemory: sessionContext.lectureMemory,
+    lectureStatus: sessionContext.lectureStatus,
+    documentName: sessionContext.documentName,
+    publishedAt: sessionContext.publishedAt,
   })
 })
 

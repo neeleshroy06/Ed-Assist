@@ -18,26 +18,27 @@ function MicIcon({ size = 48, color = 'var(--primary)' }) {
   )
 }
 
-export default function LectureRecorder({ onTranscriptReady }) {
+export default function LectureRecorder({
+  lectureStatus,
+  transcriptText,
+  onTranscriptChange,
+  onLectureStart,
+  onLectureProcessed,
+  processingError,
+  lectureMemoryCount,
+  annotationCount,
+  canStartLecture,
+}) {
   const recorder = useAudioRecorder()
-  const fileInputRef = useRef(null)
   const canvasRef = useRef(null)
   const audioContextRef = useRef(null)
   const analyserRef = useRef(null)
   const rafRef = useRef(null)
+  const recordingStartedAtRef = useRef(0)
   const [viewState, setViewState] = useState('idle')
-  const [transcript, setTranscript] = useState('')
   const [expanded, setExpanded] = useState(false)
   const [error, setError] = useState('')
   const [progress, setProgress] = useState(0)
-
-  useEffect(() => {
-    let timeout
-    if (viewState === 'done') {
-      timeout = setTimeout(() => onTranscriptReady?.(transcript), 500)
-    }
-    return () => clearTimeout(timeout)
-  }, [transcript, viewState, onTranscriptReady])
 
   useEffect(() => {
     if (!recorder.isRecording || !recorder.streamRef?.current || !canvasRef.current) return undefined
@@ -95,7 +96,7 @@ export default function LectureRecorder({ onTranscriptReady }) {
     return () => clearInterval(interval)
   }, [viewState])
 
-  const processBlob = async (blob) => {
+  const processBlob = async (blob, durationMs) => {
     if (!blob) return
     if (blob.size < 256) {
       setError('No usable audio was captured. Check the mic permission, try another browser, or record for a few seconds.')
@@ -109,11 +110,17 @@ export default function LectureRecorder({ onTranscriptReady }) {
       const formData = new FormData()
       const ext = blob.type?.includes('mp4') ? 'm4a' : 'webm'
       formData.append('audio', blob, `lecture.${ext}`)
+      formData.append('durationMs', String(Math.round(durationMs)))
       const response = await axios.post('/api/transcribe', formData)
       const nextTranscript = response.data?.transcript || ''
-      setTranscript(nextTranscript)
-      onTranscriptReady?.(nextTranscript)
+      const nextSegments = Array.isArray(response.data?.segments) ? response.data.segments : []
+      onTranscriptChange?.(nextTranscript)
       setProgress(100)
+      await onLectureProcessed?.({
+        transcript: nextTranscript,
+        transcriptSegments: nextSegments,
+        durationMs: Math.round(durationMs),
+      })
       setViewState('done')
     } catch (requestError) {
       setError(requestError.response?.data?.message || 'Transcription failed.')
@@ -123,21 +130,23 @@ export default function LectureRecorder({ onTranscriptReady }) {
 
   const handleStart = async () => {
     setError('')
-    await recorder.start()
-    setViewState('recording')
+    onTranscriptChange?.('')
+    try {
+      await recorder.start()
+      recordingStartedAtRef.current = performance.now()
+      await onLectureStart?.()
+      setViewState('recording')
+    } catch (startError) {
+      setError(startError.message || 'Microphone access failed.')
+      setViewState('idle')
+    }
   }
 
   const handleStop = async () => {
+    const durationMs = Math.max(recorder.elapsed * 1000, performance.now() - recordingStartedAtRef.current)
     const blob = await recorder.stop()
     setViewState('processing')
-    await processBlob(blob)
-  }
-
-  const handleUpload = async (event) => {
-    const file = event.target.files?.[0]
-    if (!file) return
-    await processBlob(file)
-    event.target.value = ''
+    await processBlob(blob, durationMs)
   }
 
   const status = useMemo(() => {
@@ -148,50 +157,40 @@ export default function LectureRecorder({ onTranscriptReady }) {
 
   return (
     <section className="glass-card" style={{ padding: 24, minHeight: 360 }}>
-      {viewState === 'idle' && (
+      {viewState === 'idle' && !transcriptText && (
         <div style={{ minHeight: 310, display: 'grid', placeItems: 'center', textAlign: 'center' }}>
           <div>
             <MicIcon />
-            <h2 style={{ margin: '16px 0 8px', fontSize: 20 }}>Record Your Lecture</h2>
+            <h2 style={{ margin: '16px 0 8px', fontSize: 20 }}>Start Lecture</h2>
             <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 14 }}>
-              Speak naturally - ElevenLabs will transcribe every word
+              Speak naturally while annotating the PDF. ElevenLabs will transcribe every word.
             </p>
 
             <button
               type="button"
               aria-label="Start lecture recording"
               onClick={handleStart}
+              disabled={!canStartLecture}
               style={{
                 width: 72,
                 height: 72,
                 borderRadius: '50%',
                 border: 'none',
                 marginTop: 28,
-                background: 'var(--primary)',
+                background: canStartLecture ? 'var(--primary)' : 'rgba(255,255,255,0.12)',
                 color: 'white',
-                cursor: 'pointer',
+                cursor: canStartLecture ? 'pointer' : 'not-allowed',
                 boxShadow: '0 0 36px rgba(255,77,106,0.22)',
+                opacity: canStartLecture ? 1 : 0.5,
               }}
             >
               <MicIcon size={28} color="white" />
             </button>
-
-            <button
-              type="button"
-              aria-label="Upload an existing lecture recording"
-              onClick={() => fileInputRef.current?.click()}
-              style={{
-                display: 'block',
-                margin: '18px auto 0',
-                background: 'none',
-                border: 'none',
-                color: 'var(--text-muted)',
-                fontSize: 13,
-                cursor: 'pointer',
-              }}
-            >
-              or upload an existing recording →
-            </button>
+            {!canStartLecture && (
+              <p style={{ marginTop: 14, fontSize: 13, color: 'var(--text-muted)' }}>
+                Upload a lecture PDF first so your annotations can be published with the transcript.
+              </p>
+            )}
             {error && <p style={{ color: 'var(--danger)', marginTop: 12 }}>{error}</p>}
           </div>
         </div>
@@ -252,7 +251,9 @@ export default function LectureRecorder({ onTranscriptReady }) {
                 margin: '0 auto 16px',
               }}
             />
-            <p style={{ fontWeight: 600 }}>Transcribing with ElevenLabs Scribe...</p>
+            <p style={{ fontWeight: 600 }}>
+              {lectureStatus === 'processing' ? 'Generating lecture memory...' : 'Transcribing with ElevenLabs Scribe...'}
+            </p>
             <div style={{ marginTop: 20, height: 8, borderRadius: 999, background: 'rgba(255,255,255,0.05)' }}>
               <div
                 style={{
@@ -268,11 +269,40 @@ export default function LectureRecorder({ onTranscriptReady }) {
         </div>
       )}
 
-      {viewState === 'done' && (
+      {(viewState === 'done' || transcriptText) && (
         <div className="animate-fade-in">
-          <div style={{ textAlign: 'center' }}>
-            <div style={{ fontSize: 48, color: 'var(--secondary)' }}>✓</div>
-            <h2 style={{ margin: '8px 0 4px', fontSize: 22 }}>Transcript Ready ✓</h2>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'start' }}>
+            <div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                Lecture status
+              </div>
+              <h2 style={{ margin: '8px 0 4px', fontSize: 22 }}>
+                {lectureStatus === 'published' ? 'Published for students' : 'Transcript ready'}
+              </h2>
+              <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 13 }}>
+                {lectureStatus === 'published'
+                  ? `${lectureMemoryCount} lecture memory ${lectureMemoryCount === 1 ? 'entry' : 'entries'} generated from ${annotationCount} annotations.`
+                  : 'Review the transcript before students receive the lecture package.'}
+              </p>
+            </div>
+            <div
+              className="glass-card"
+              style={{
+                padding: 14,
+                minWidth: 180,
+                display: 'grid',
+                gap: 6,
+                textAlign: 'left',
+              }}
+            >
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>Professor workflow</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <StatusDot color={lectureStatus === 'published' ? 'var(--secondary)' : 'var(--amber)'} />
+                <span style={{ fontSize: 13 }}>
+                  {lectureStatus === 'published' ? 'Auto-published' : lectureStatus === 'processing' ? 'Processing' : 'Awaiting publish'}
+                </span>
+              </div>
+            </div>
           </div>
 
           <button
@@ -299,8 +329,8 @@ export default function LectureRecorder({ onTranscriptReady }) {
             rows={expanded ? 12 : 4}
             className="input-surface transcript-mono"
             style={{ marginTop: 12, fontSize: 12, lineHeight: 1.6 }}
-            value={transcript}
-            onChange={(event) => setTranscript(event.target.value)}
+            value={transcriptText}
+            onChange={(event) => onTranscriptChange?.(event.target.value)}
           />
 
           <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
@@ -309,21 +339,21 @@ export default function LectureRecorder({ onTranscriptReady }) {
             </button>
             <button
               type="button"
-              aria-label="Record lecture again"
+              aria-label="Record a new lecture"
               className="btn-secondary"
               onClick={() => {
-                setTranscript('')
-                onTranscriptReady?.('')
+                onTranscriptChange?.('')
                 setViewState('idle')
               }}
             >
-              ↺ Re-record
+              ↺ New Lecture
             </button>
           </div>
+          {(error || processingError) && (
+            <p style={{ marginTop: 12, color: 'var(--danger)', fontSize: 13 }}>{error || processingError}</p>
+          )}
         </div>
       )}
-
-      <input ref={fileInputRef} type="file" hidden accept="audio/*" onChange={handleUpload} />
     </section>
   )
 }
