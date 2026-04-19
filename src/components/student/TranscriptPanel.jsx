@@ -47,7 +47,7 @@ export default function TranscriptPanel({ entries }) {
                 const url = URL.createObjectURL(blob)
                 const link = document.createElement('a')
                 link.href = url
-                link.download = 'ed-assist-session.txt'
+                link.download = 'lecture-studio-session.txt'
                 link.click()
                 URL.revokeObjectURL(url)
               }}

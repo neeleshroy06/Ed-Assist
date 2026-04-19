@@ -59,7 +59,7 @@ function strokeStyle(stroke) {
     }
   }
   return {
-    stroke: stroke.color || '#6C63FF',
+    stroke: stroke.color || '#38bdf8',
     strokeWidth: stroke.width,
     globalCompositeOperation: 'source-over',
   }
@@ -78,12 +78,12 @@ function buildAnnotationLabel(stroke) {
   return `${summariseTool(stroke.tool)} page region`
 }
 
-function ToolButton({ active, children, disabled, ...props }) {
+function RailToolButton({ active, children, disabled, ...props }) {
   return (
     <button
       type="button"
-      className={active ? 'btn-primary' : 'btn-secondary'}
-      style={{ padding: '8px 14px', minWidth: 84, fontSize: 13, opacity: disabled ? 0.45 : 1 }}
+      className={`tool-rail-btn ${active ? 'tool-rail-btn--active' : ''}`}
+      style={{ opacity: disabled ? 0.45 : 1 }}
       disabled={disabled}
       {...props}
     >
@@ -475,7 +475,7 @@ export default function ProfessorDocumentWorkspace({
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         page: pageNum,
         tool,
-        color: tool === 'highlighter' ? '#F5C618' : '#6C63FF',
+        color: tool === 'highlighter' ? '#F5C618' : '#38bdf8',
         width: tool === 'highlighter' ? 12 : 4,
         points: [point],
         startedAtMs,
@@ -531,6 +531,64 @@ export default function ProfessorDocumentWorkspace({
     return `${annotationEvents.length} marks across ${pages} pages · ${drawings} pen · ${highlights} highlighter`
   }, [annotationEvents])
 
+  const toolsColumn = (
+    <aside
+      style={{
+        borderLeft: '1px solid rgba(56, 189, 248, 0.12)',
+        background: 'linear-gradient(180deg, rgba(56,189,248,0.06) 0%, rgba(5,10,18,0.35) 100%)',
+        padding: '14px 12px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 10,
+        minHeight: 0,
+        overflowY: 'auto',
+      }}
+    >
+      <div
+        style={{
+          fontSize: 10,
+          fontWeight: 700,
+          letterSpacing: '0.16em',
+          textTransform: 'uppercase',
+          color: 'var(--text-muted)',
+        }}
+      >
+        Tools
+      </div>
+
+      <RailToolButton disabled={!allowUpload} onClick={() => inputRef.current?.click()}>
+        {documentState?.pdfBase64 ? 'Replace PDF' : 'Upload PDF'}
+      </RailToolButton>
+
+      <div style={{ height: 1, background: 'rgba(56,189,248,0.12)', margin: '4px 0' }} />
+
+      <RailToolButton active={tool === 'pen'} disabled={!canAnnotate} onClick={() => setTool('pen')}>
+        Pen
+      </RailToolButton>
+      <RailToolButton active={tool === 'highlighter'} disabled={!canAnnotate} onClick={() => setTool('highlighter')}>
+        Highlighter
+      </RailToolButton>
+      <RailToolButton active={tool === 'eraser'} disabled={!canAnnotate} onClick={() => setTool('eraser')}>
+        Eraser
+      </RailToolButton>
+
+      <button
+        type="button"
+        className="tool-rail-btn"
+        style={{ opacity: !annotationEvents.length || !canAnnotate ? 0.45 : 1 }}
+        disabled={!annotationEvents.length || !canAnnotate}
+        onClick={() => onAnnotationEventsChange([])}
+      >
+        Clear marks
+      </button>
+
+      <div style={{ height: 1, background: 'rgba(56,189,248,0.12)', margin: '4px 0' }} />
+
+      <RailToolButton onClick={() => setScale((value) => Math.min(1.8, value + 0.1))}>Zoom +</RailToolButton>
+      <RailToolButton onClick={() => setScale((value) => Math.max(0.9, value - 0.1))}>Zoom −</RailToolButton>
+    </aside>
+  )
+
   return (
     <section
       className="glass-card"
@@ -539,15 +597,15 @@ export default function ProfessorDocumentWorkspace({
         flex: 1,
         minHeight: 0,
         width: '100%',
-        display: 'grid',
-        gridTemplateRows: 'auto auto 1fr',
+        display: 'flex',
+        flexDirection: 'column',
         overflow: 'hidden',
       }}
     >
       <div
         style={{
           padding: '18px 20px 14px',
-          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          borderBottom: '1px solid rgba(56,189,248,0.1)',
           display: 'flex',
           alignItems: 'flex-start',
           justifyContent: 'space-between',
@@ -558,7 +616,7 @@ export default function ProfessorDocumentWorkspace({
         <div>
           <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600, letterSpacing: '-0.02em' }}>Slides</h2>
           <p style={{ margin: '6px 0 0', color: 'var(--text-secondary)', fontSize: 13, maxWidth: 420 }}>
-            After you start the lecture, upload your PDF here and annotate while you speak.
+            After you start the lecture, upload your PDF and use the tools on the right while you speak.
           </p>
         </div>
         <div
@@ -568,7 +626,7 @@ export default function ProfessorDocumentWorkspace({
             padding: '6px 10px',
             borderRadius: 999,
             border: '1px solid var(--border)',
-            background: 'rgba(255,255,255,0.03)',
+            background: 'rgba(56,189,248,0.06)',
             whiteSpace: 'nowrap',
           }}
         >
@@ -576,155 +634,123 @@ export default function ProfessorDocumentWorkspace({
         </div>
       </div>
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, padding: '12px 20px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-        <button
-          type="button"
-          className="btn-secondary"
-          style={{ padding: '8px 14px', fontSize: 13 }}
-          disabled={!allowUpload}
-          onClick={() => inputRef.current?.click()}
-        >
-          {documentState?.pdfBase64 ? 'Replace PDF' : 'Upload PDF'}
-        </button>
-        <ToolButton active={tool === 'pen'} disabled={!canAnnotate} onClick={() => setTool('pen')}>
-          Pen
-        </ToolButton>
-        <ToolButton active={tool === 'highlighter'} disabled={!canAnnotate} onClick={() => setTool('highlighter')}>
-          Highlighter
-        </ToolButton>
-        <ToolButton active={tool === 'eraser'} disabled={!canAnnotate} onClick={() => setTool('eraser')}>
-          Eraser
-        </ToolButton>
-        <button
-          type="button"
-          className="btn-secondary"
-          style={{ padding: '8px 14px', fontSize: 13 }}
-          disabled={!annotationEvents.length || !canAnnotate}
-          onClick={() => onAnnotationEventsChange([])}
-        >
-          Clear marks
-        </button>
-        <button
-          type="button"
-          className="btn-secondary"
-          style={{ padding: '8px 14px', fontSize: 13 }}
-          onClick={() => setScale((value) => Math.min(1.8, value + 0.1))}
-        >
-          Zoom +
-        </button>
-        <button
-          type="button"
-          className="btn-secondary"
-          style={{ padding: '8px 14px', fontSize: 13 }}
-          onClick={() => setScale((value) => Math.max(0.9, value - 0.1))}
-        >
-          Zoom -
-        </button>
-      </div>
-
-      {!documentState?.pdfBase64 && (
-        <button
-          type="button"
-          disabled={!allowUpload}
-          onClick={() => allowUpload && inputRef.current?.click()}
-          onDragOver={(event) => {
-            if (!allowUpload) return
-            event.preventDefault()
-            setIsDragging(true)
-          }}
-          onDragLeave={() => setIsDragging(false)}
-          onDrop={(event) => {
-            if (!allowUpload) return
-            event.preventDefault()
-            setIsDragging(false)
-            const dropped = event.dataTransfer.files?.[0]
-            if (dropped) handleFile(dropped)
-          }}
-          style={{
-            margin: 16,
-            minHeight: 280,
-            borderRadius: 14,
-            border: `2px dashed ${isDragging ? 'var(--primary)' : 'var(--border)'}`,
-            background: isDragging ? 'rgba(108,99,255,0.1)' : 'rgba(255,255,255,0.02)',
-            color: 'var(--text-secondary)',
-            cursor: allowUpload ? 'pointer' : 'not-allowed',
-            padding: 24,
-            opacity: allowUpload ? 1 : 0.55,
-          }}
-        >
-          <div style={{ maxWidth: 380, margin: '0 auto', textAlign: 'center' }}>
-            <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>
-              {allowUpload ? 'Drop PDF here or click to browse' : 'Start lecture to upload'}
-            </div>
-            <div style={{ marginTop: 10, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-              {allowUpload
-                ? 'Pages render below. Annotations are saved when you stop the lecture.'
-                : 'Press Start Lecture in the left panel first, then add your slides.'}
-            </div>
-          </div>
-        </button>
-      )}
-
-      {documentState?.pdfBase64 && (
-        <div style={{ minHeight: 0, overflow: 'hidden', display: 'grid', gridTemplateRows: 'auto 1fr', gap: 0 }}>
-          <div
-            style={{
-              padding: '12px 20px',
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: 10,
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              borderBottom: '1px solid rgba(255,255,255,0.06)',
-              background: 'rgba(0,0,0,0.15)',
-            }}
-          >
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {documentState.fileName || 'Lecture document.pdf'}
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: 'grid',
+          gridTemplateColumns: 'minmax(0, 1fr) 200px',
+        }}
+      >
+        <div style={{ minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          {!documentState?.pdfBase64 && (
+            <button
+              type="button"
+              disabled={!allowUpload}
+              onClick={() => allowUpload && inputRef.current?.click()}
+              onDragOver={(event) => {
+                if (!allowUpload) return
+                event.preventDefault()
+                setIsDragging(true)
+              }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={(event) => {
+                if (!allowUpload) return
+                event.preventDefault()
+                setIsDragging(false)
+                const dropped = event.dataTransfer.files?.[0]
+                if (dropped) handleFile(dropped)
+              }}
+              style={{
+                margin: 16,
+                minHeight: 280,
+                borderRadius: 14,
+                border: `2px dashed ${isDragging ? 'var(--primary)' : 'var(--border)'}`,
+                background: isDragging ? 'rgba(56,189,248,0.12)' : 'rgba(56,189,248,0.04)',
+                color: 'var(--text-secondary)',
+                cursor: allowUpload ? 'pointer' : 'not-allowed',
+                padding: 24,
+                opacity: allowUpload ? 1 : 0.55,
+                flex: 1,
+              }}
+            >
+              <div style={{ maxWidth: 380, margin: '0 auto', textAlign: 'center' }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>
+                  {allowUpload ? 'Drop PDF here or click to browse' : 'Start lecture to upload'}
+                </div>
+                <div style={{ marginTop: 10, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                  {allowUpload
+                    ? 'Pages appear in this column. Annotations are saved when you stop the lecture.'
+                    : 'Press Start Lecture in the left panel first, then add your slides.'}
+                </div>
               </div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                {status === 'loading' ? 'Rendering…' : `${documentState.pageCount || pdfDoc?.numPages || 0} pages`}
+            </button>
+          )}
+
+          {documentState?.pdfBase64 && (
+            <div style={{ minHeight: 0, overflow: 'hidden', display: 'grid', gridTemplateRows: 'auto 1fr', gap: 0, flex: 1 }}>
+              <div
+                style={{
+                  padding: '12px 20px',
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: 10,
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  borderBottom: '1px solid rgba(56,189,248,0.1)',
+                  background: 'rgba(0,0,0,0.2)',
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {documentState.fileName || 'Lecture document.pdf'}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                    {status === 'loading' ? 'Rendering…' : `${documentState.pageCount || pdfDoc?.numPages || 0} pages`}
+                  </div>
+                </div>
+                <div style={{ fontSize: 11, color: canAnnotate ? 'var(--secondary)' : 'var(--text-muted)', fontWeight: 500 }}>
+                  {canAnnotate ? 'Annotations are timestamped' : 'Recording paused or idle'}
+                </div>
+              </div>
+
+              <div
+                className="muted-scrollbar"
+                style={{
+                  minHeight: 0,
+                  overflowY: 'auto',
+                  overflowX: 'hidden',
+                  overscrollBehavior: 'contain',
+                  padding: '16px 20px 20px',
+                  background: 'rgba(0,0,0,0.22)',
+                }}
+              >
+                {pdfDoc &&
+                  Array.from({ length: pdfDoc.numPages }, (_, index) => {
+                    const pageNum = index + 1
+                    return (
+                      <PdfAnnotatorPage
+                        key={pageNum}
+                        pdfDocument={pdfDoc}
+                        pageNum={pageNum}
+                        scale={scale}
+                        strokes={strokesByPage.get(pageNum) || []}
+                        activeStroke={activeStroke?.page === pageNum ? activeStroke : null}
+                        canAnnotate={canAnnotate}
+                        onPageRefsChange={onPageRefsChange}
+                        onDrawStart={handleDrawStart}
+                        onDrawMove={handleDrawMove}
+                        onDrawEnd={handleDrawEnd}
+                      />
+                    )
+                  })}
               </div>
             </div>
-            <div style={{ fontSize: 11, color: canAnnotate ? 'var(--secondary)' : 'var(--text-muted)', fontWeight: 500 }}>
-              {canAnnotate ? 'Annotations are timestamped' : 'Recording paused or idle'}
-            </div>
-          </div>
-
-          <div
-            className="muted-scrollbar"
-            style={{
-              minHeight: 0,
-              overflowY: 'auto',
-              overflowX: 'hidden',
-              overscrollBehavior: 'contain',
-              padding: '16px 20px 20px',
-              background: 'rgba(0,0,0,0.25)',
-            }}
-          >
-            {pdfDoc &&
-              Array.from({ length: pdfDoc.numPages }, (_, index) => {
-                const pageNum = index + 1
-                return (
-                  <PdfAnnotatorPage
-                    key={pageNum}
-                    pdfDocument={pdfDoc}
-                    pageNum={pageNum}
-                    scale={scale}
-                    strokes={strokesByPage.get(pageNum) || []}
-                    activeStroke={activeStroke?.page === pageNum ? activeStroke : null}
-                    canAnnotate={canAnnotate}
-                    onPageRefsChange={onPageRefsChange}
-                    onDrawStart={handleDrawStart}
-                    onDrawMove={handleDrawMove}
-                    onDrawEnd={handleDrawEnd}
-                  />
-                )
-              })}
-          </div>
+          )}
         </div>
-      )}
+
+        {toolsColumn}
+      </div>
 
       {error && (
         <p style={{ margin: '0 20px 16px', color: 'var(--danger)', fontSize: 13 }}>

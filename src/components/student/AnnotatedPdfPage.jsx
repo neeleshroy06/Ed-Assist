@@ -196,8 +196,8 @@ export default function AnnotatedPdfPage({
               transition: 'background 120ms ease, border-color 120ms ease',
             }}
             onMouseEnter={(event) => {
-              event.currentTarget.style.background = 'rgba(108,99,255,0.18)'
-              event.currentTarget.style.borderColor = 'rgba(108,99,255,0.55)'
+              event.currentTarget.style.background = 'rgba(56,189,248,0.2)'
+              event.currentTarget.style.borderColor = 'rgba(56,189,248,0.55)'
             }}
             onMouseLeave={(event) => {
               event.currentTarget.style.background = 'transparent'

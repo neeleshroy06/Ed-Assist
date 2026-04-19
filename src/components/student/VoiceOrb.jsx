@@ -19,7 +19,7 @@ export default function VoiceOrb({ orbState = 'idle', audioLevel = 0 }) {
                 position: 'absolute',
                 inset: 40,
                 borderRadius: '50%',
-                border: '2px solid rgba(108,99,255,0.4)',
+                border: '2px solid rgba(56,189,248,0.45)',
                 animation: `orb-ripple 1.5s ease-out ${delay}s infinite`,
               }}
             />
@@ -78,16 +78,16 @@ export default function VoiceOrb({ orbState = 'idle', audioLevel = 0 }) {
               orbState === 'speaking'
                 ? 'radial-gradient(circle, rgba(245,158,11,0.3) 0%, rgba(245,158,11,0.05) 100%)'
                 : orbState === 'listening'
-                  ? 'radial-gradient(circle, rgba(108,99,255,0.35) 0%, rgba(108,99,255,0.08) 100%)'
-                  : 'radial-gradient(circle, rgba(108,99,255,0.15) 0%, rgba(108,99,255,0.03) 100%)',
+                  ? 'radial-gradient(circle, rgba(56,189,248,0.38) 0%, rgba(56,189,248,0.08) 100%)'
+                  : 'radial-gradient(circle, rgba(56,189,248,0.16) 0%, rgba(56,189,248,0.03) 100%)',
             border:
               orbState === 'speaking'
                 ? '1px solid rgba(245,158,11,0.5)'
-                : '1px solid rgba(108,99,255,0.3)',
+                : '1px solid rgba(56,189,248,0.32)',
             boxShadow:
               orbState === 'speaking'
                 ? '0 0 60px rgba(245,158,11,0.2)'
-                : '0 0 40px rgba(108,99,255,0.1)',
+                : '0 0 40px rgba(56,189,248,0.12)',
           }}
         />
       </div>

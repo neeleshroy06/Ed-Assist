@@ -1,79 +1,65 @@
+import ThemeToggle from './ThemeToggle'
+
 export default function NavBar({ activeTab, onTabChange }) {
   const tabs = [
-    { id: 'professor', label: '👨‍🏫 Professor' },
-    { id: 'student', label: '👩‍🎓 Student' },
+    { id: 'professor', label: 'Professor' },
+    { id: 'student', label: 'Student' },
   ]
 
   return (
     <nav
-      className="glass-card"
+      className="glass-card app-nav"
       style={{
         height: 60,
         margin: 12,
         marginBottom: 0,
-        padding: '0 20px',
-        display: 'flex',
+        padding: '0 16px',
+        display: 'grid',
+        gridTemplateColumns: 'minmax(0, 1fr) auto minmax(0, 1fr)',
         alignItems: 'center',
-        gap: 18,
+        gap: 12,
         borderRadius: 18,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
         <div
           aria-hidden="true"
           style={{
             width: 32,
             height: 32,
             borderRadius: 8,
-            background: 'var(--primary)',
+            background: 'linear-gradient(135deg, var(--primary), var(--accent))',
             display: 'grid',
             placeItems: 'center',
-            fontSize: 16,
+            fontSize: 15,
+            fontWeight: 800,
+            color: 'var(--nav-mark-text)',
             boxShadow: '0 0 22px var(--primary-glow)',
+            flexShrink: 0,
           }}
         >
-          🎓
+          LS
         </div>
-        <span style={{ fontWeight: 600, fontSize: 18 }}>Ed-Assist</span>
+        <span style={{ fontWeight: 700, fontSize: 18, letterSpacing: '-0.03em', whiteSpace: 'nowrap' }}>Lecture Studio</span>
       </div>
 
-      <div style={{ width: 40 }} />
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            aria-label={`Open ${tab.id} tab`}
+            className={`app-nav-tab ${activeTab === tab.id ? 'app-nav-tab--active' : ''}`}
+            onClick={() => onTabChange(tab.id)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-      {tabs.map((tab) => (
-        <button
-          key={tab.id}
-          type="button"
-          aria-label={`Open ${tab.id} tab`}
-          onClick={() => onTabChange(tab.id)}
-          style={{
-            height: '100%',
-            background: 'transparent',
-            border: 'none',
-            borderBottom: activeTab === tab.id ? '2px solid var(--primary)' : '2px solid transparent',
-            color: activeTab === tab.id ? 'var(--text-primary)' : 'var(--text-muted)',
-            fontWeight: 500,
-            cursor: 'pointer',
-            padding: '0 6px',
-          }}
-        >
-          {tab.label}
-        </button>
-      ))}
-
-      <div style={{ flex: 1 }} />
-
-      <div
-        style={{
-          fontSize: 11,
-          color: 'var(--secondary)',
-          border: '1px solid rgba(0,212,170,0.55)',
-          borderRadius: 999,
-          padding: '6px 10px',
-          fontWeight: 600,
-          letterSpacing: '0.04em',
-        }}
-      >
-        ♿ ADA Compliant
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, minWidth: 0 }}>
+        <ThemeToggle />
+        <div className="app-nav-badge">ADA Compliant</div>
       </div>
     </nav>
   )

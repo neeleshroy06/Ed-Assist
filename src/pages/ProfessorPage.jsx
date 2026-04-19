@@ -14,7 +14,6 @@ export default function ProfessorPage() {
   const [transcriptText, setTranscriptText] = useState('')
   const [transcriptSegments, setTranscriptSegments] = useState([])
   const [annotationEvents, setAnnotationEvents] = useState([])
-  const [lectureMemory, setLectureMemory] = useState([])
   const [documentState, setDocumentState] = useState({
     fileName: '',
     pdfBase64: null,
@@ -28,9 +27,8 @@ export default function ProfessorPage() {
       annotationCount: annotationEvents.length,
       highlightedCount,
       penCount: annotationEvents.length - highlightedCount,
-      memoryCount: lectureMemory.length,
     }
-  }, [annotationEvents, lectureMemory.length])
+  }, [annotationEvents])
 
   const getCurrentTimestampMs = useCallback(() => {
     if (!lectureStartedAtRef.current) return 0
@@ -48,7 +46,6 @@ export default function ProfessorPage() {
     setLectureStatus('idle')
     setTranscriptText('')
     setTranscriptSegments([])
-    setLectureMemory([])
     setAnnotationEvents([])
     setProcessingError('')
     setProcessingNotice('')
@@ -62,7 +59,6 @@ export default function ProfessorPage() {
     setProcessingNotice('')
     setTranscriptText('')
     setTranscriptSegments([])
-    setLectureMemory([])
     setAnnotationEvents([])
     setRuntimeStatus(null)
     try {
@@ -93,43 +89,6 @@ export default function ProfessorPage() {
     }
   }, [])
 
-  useEffect(() => {
-    if (lectureStatus !== 'published') return undefined
-    if (!runtimeStatus || (runtimeStatus.lectureMemoryMode !== 'pending' && runtimeStatus.chapterDetectionMode !== 'pending')) {
-      return undefined
-    }
-
-    let cancelled = false
-    const refresh = async () => {
-      try {
-        const response = await axios.get(apiRequestUrl('/api/context'))
-        if (cancelled) return
-        const data = response.data || {}
-        setLectureMemory(Array.isArray(data.lectureMemory) ? data.lectureMemory : [])
-        setRuntimeStatus(data.runtimeStatus || null)
-        if (data.runtimeStatus?.lectureMemoryMode === 'ready') {
-          setProcessingNotice('Gemma 4 lecture memory is ready for students.')
-        } else if (data.runtimeStatus?.lectureMemoryMode === 'error') {
-          setProcessingNotice(data.runtimeStatus.lectureMemoryError || 'Gemma 4 lecture memory is unavailable right now.')
-        } else if (data.runtimeStatus?.lectureMemoryMode === 'pending') {
-          setProcessingNotice('Published for students. Gemma 4 is still building lecture memory...')
-        }
-      } catch {
-        // best-effort background refresh
-      }
-    }
-
-    void refresh()
-    const intervalId = window.setInterval(() => {
-      void refresh()
-    }, 2500)
-
-    return () => {
-      cancelled = true
-      window.clearInterval(intervalId)
-    }
-  }, [lectureStatus, runtimeStatus])
-
   const handleLectureProcessed = useCallback(
     async ({ transcript, transcriptSegments: nextSegments, durationMs }) => {
       setTranscriptText(transcript)
@@ -139,9 +98,8 @@ export default function ProfessorPage() {
 
       if (!documentState.pdfBase64) {
         setLectureStatus('idle')
-        setLectureMemory([])
         const message =
-          'No PDF was uploaded during this lecture, so slides and lecture memory were not published. Upload a PDF before you stop the next lecture.'
+          'No PDF was uploaded during this lecture, so slides were not published. Upload a PDF before you stop the next lecture.'
         setProcessingError(message)
         try {
           await axios.post(apiRequestUrl('/api/set-context'), {
@@ -168,13 +126,12 @@ export default function ProfessorPage() {
           pageCount: documentState.pageCount,
           lectureDurationMs: durationMs,
         })
-        setLectureMemory(Array.isArray(response.data?.lectureMemory) ? response.data.lectureMemory : [])
         setLectureStatus(response.data?.status || 'published')
         setRuntimeStatus(response.data?.runtimeStatus || null)
         const warnings = Array.isArray(response.data?.warnings) ? response.data.warnings.filter(Boolean) : []
         const nextNotice =
           response.data?.runtimeStatus?.lectureMemoryMode === 'pending'
-            ? 'Published for students. Gemma 4 is still building lecture memory...'
+            ? 'Published for students. Enrichment is still running in the background.'
             : warnings.join(' ')
         setProcessingNotice(nextNotice)
         return {
@@ -215,7 +172,7 @@ export default function ProfessorPage() {
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        background: 'linear-gradient(180deg, rgba(18,18,26,0.98) 0%, var(--bg) 38%)',
+        background: 'linear-gradient(180deg, rgba(5,10,18,0.98) 0%, var(--bg) 38%)',
       }}
     >
       <div
@@ -223,7 +180,7 @@ export default function ProfessorPage() {
           flex: 1,
           minHeight: 0,
           display: 'grid',
-          gridTemplateColumns: 'minmax(340px, 420px) minmax(0, 1fr)',
+          gridTemplateColumns: 'minmax(380px, 520px) minmax(0, 1fr)',
           gap: 16,
           padding: 16,
         }}
@@ -242,7 +199,7 @@ export default function ProfessorPage() {
             style={{
               padding: 20,
               borderRadius: 18,
-              flex: '1 1 58%',
+              flex: 1,
               minHeight: 0,
               display: 'flex',
               flexDirection: 'column',
@@ -262,7 +219,7 @@ export default function ProfessorPage() {
                 >
                   Professor
                 </div>
-                <h1 style={{ margin: '6px 0 0', fontSize: 22, fontWeight: 700, letterSpacing: '-0.03em' }}>Lecture studio</h1>
+                <h1 style={{ margin: '6px 0 0', fontSize: 22, fontWeight: 700, letterSpacing: '-0.03em' }}>Lecture Studio</h1>
                 <p style={{ margin: '6px 0 0', fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.45 }}>
                   Start the session, upload your PDF, annotate while you speak, then stop to transcribe and publish.
                 </p>
@@ -280,8 +237,8 @@ export default function ProfessorPage() {
                       fontSize: 12,
                       fontWeight: 600,
                       color: 'var(--danger)',
-                      border: '1px solid rgba(255,77,106,0.45)',
-                      background: 'rgba(255,77,106,0.08)',
+                      border: '1px solid rgba(244,114,182,0.45)',
+                      background: 'rgba(244,114,182,0.08)',
                     }}
                   >
                     <span className="pulse-dot" style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--danger)' }} />
@@ -307,7 +264,7 @@ export default function ProfessorPage() {
                       fontSize: 15,
                       fontWeight: 600,
                       borderRadius: 14,
-                      boxShadow: '0 8px 32px rgba(108,99,255,0.35)',
+                      boxShadow: '0 8px 32px rgba(56,189,248,0.35)',
                     }}
                   >
                     Start Lecture
@@ -316,10 +273,10 @@ export default function ProfessorPage() {
               </div>
             </div>
 
-            <div style={{ marginTop: 18, paddingTop: 18, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+            <div style={{ marginTop: 18, paddingTop: 18, borderTop: '1px solid rgba(56,189,248,0.1)' }}>
               <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Session & transcription</h2>
               <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-                Record, pause, stop, and review the transcript in this panel.
+                Record, pause, stop, and review the full transcript in this panel.
               </p>
             </div>
 
@@ -336,87 +293,8 @@ export default function ProfessorPage() {
                 processingError={processingError}
                 processingNotice={processingNotice}
                 runtimeStatus={runtimeStatus}
-                lectureMemoryCount={lectureStats.memoryCount}
                 annotationCount={lectureStats.annotationCount}
               />
-            </div>
-          </section>
-
-          <section
-            className="glass-card"
-            style={{
-              padding: 18,
-              borderRadius: 18,
-              flex: '1 1 42%',
-              minHeight: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
-              <div>
-                <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600 }}>Lecture memory</h2>
-                <p style={{ margin: '6px 0 0', color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.45 }}>
-                  Built when you stop, from your transcript and timed marks on the PDF.
-                </p>
-              </div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8, marginTop: 14 }}>
-              <div style={{ padding: 12, borderRadius: 12, background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)' }}>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Annotations</div>
-                <div style={{ fontSize: 20, fontWeight: 700, marginTop: 4 }}>{lectureStats.annotationCount}</div>
-              </div>
-              <div style={{ padding: 12, borderRadius: 12, background: 'rgba(0,0,0,0.2)', border: '1px solid var(--border)' }}>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Memory</div>
-                <div style={{ fontSize: 20, fontWeight: 700, marginTop: 4 }}>{lectureStats.memoryCount}</div>
-              </div>
-            </div>
-
-            <div className="muted-scrollbar" style={{ marginTop: 14, flex: 1, minHeight: 0, display: 'grid', gap: 10, overflowY: 'auto' }}>
-              {!lectureMemory.length && (
-                <div
-                  style={{
-                    padding: 14,
-                    borderRadius: 12,
-                    border: '1px dashed var(--border)',
-                    color: 'var(--text-secondary)',
-                    fontSize: 12,
-                    lineHeight: 1.5,
-                  }}
-                >
-                  {runtimeStatus?.lectureMemoryMode === 'pending'
-                    ? 'Gemma 4 is still building lecture memory in the background.'
-                    : runtimeStatus?.lectureMemoryMode === 'error'
-                      ? runtimeStatus.lectureMemoryError || 'Gemma 4 lecture memory is unavailable right now.'
-                      : 'Entries appear after you stop the lecture (with a PDF uploaded during recording).'}
-                </div>
-              )}
-
-              {lectureMemory.map((entry, index) => (
-                <article
-                  key={`${entry.timestamp}-${index}`}
-                  style={{
-                    padding: 12,
-                    borderRadius: 12,
-                    border: '1px solid var(--border)',
-                    background: 'rgba(255,255,255,0.03)',
-                    display: 'grid',
-                    gap: 6,
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, fontSize: 11, color: 'var(--text-muted)' }}>
-                    <span>Page {entry.page || '?'}</span>
-                    <span>{Math.round((entry.timestamp || 0) / 1000)}s</span>
-                  </div>
-                  <div style={{ fontWeight: 600, fontSize: 13 }}>{entry.summary || '—'}</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{entry.annotation || ''}</div>
-                  <div className="transcript-mono" style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.45 }}>
-                    {entry.transcript || ''}
-                  </div>
-                </article>
-              ))}
             </div>
           </section>
         </aside>

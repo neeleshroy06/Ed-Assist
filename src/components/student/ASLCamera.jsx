@@ -17,7 +17,7 @@ function sentenceCase(value) {
   return cleaned.charAt(0).toUpperCase() + cleaned.slice(1)
 }
 
-export default function ASLCamera({ onSpelledWord, active }) {
+export default function ASLCamera({ onSpelledWord, active, sessionState = 'idle', onStartSession, onEndSession }) {
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
   const [spelledText, setSpelledText] = useState('')
@@ -52,6 +52,8 @@ export default function ASLCamera({ onSpelledWord, active }) {
     },
     [clearVoteWindow],
   )
+
+  const sessionActive = sessionState === 'active'
 
   const flushText = useCallback(() => {
     const text = sentenceCase(spelledText)
@@ -96,7 +98,7 @@ export default function ASLCamera({ onSpelledWord, active }) {
     if (!spelledText.trim()) return undefined
 
     const idleFor = lastHandSeenAtRef.current ? timestamp - lastHandSeenAtRef.current : 0
-    if (idleFor >= IDLE_SEND_MS) {
+    if (sessionActive && idleFor >= IDLE_SEND_MS) {
       flushText()
       return undefined
     }
@@ -106,7 +108,7 @@ export default function ASLCamera({ onSpelledWord, active }) {
     }
 
     return undefined
-  }, [active, classifier.classification, classifier.hasHand, classifier.updatedAt, commitWinningLetter, flushText, spelledText])
+  }, [active, classifier.classification, classifier.hasHand, classifier.updatedAt, commitWinningLetter, flushText, sessionActive, spelledText])
 
   if (!active) return null
 
@@ -193,54 +195,70 @@ export default function ASLCamera({ onSpelledWord, active }) {
           background: 'var(--surface-raised)',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className={sessionActive ? 'btn-danger' : 'btn-primary'}
+            style={{ padding: '10px 16px', fontSize: 14, minWidth: 150 }}
+            onClick={() => {
+              if (sessionActive) {
+                onEndSession?.()
+              } else {
+                void onStartSession?.()
+              }
+            }}
+          >
+            {sessionActive ? 'End Session' : sessionState === 'connecting' ? 'Starting...' : 'Start Session'}
+          </button>
+          <span
+            style={{
+              padding: '6px 10px',
+              borderRadius: 999,
+              border: '1px solid var(--border)',
+              background: 'rgba(56,189,248,0.06)',
+              fontSize: 11,
+              color: 'var(--text-secondary)',
+              fontWeight: 600,
+              letterSpacing: '0.06em',
+              textTransform: 'uppercase',
+            }}
+          >
+            {sessionActive ? 'Gemini Live connected' : 'Start a session to send ASL text'}
+          </span>
+        </div>
+
+        <div style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 10 }}>
           <div
             style={{
-              fontSize: 40,
+              fontSize: 32,
               fontWeight: 700,
               lineHeight: 1,
               color: 'var(--primary)',
-              minWidth: 56,
+              minWidth: 44,
               textAlign: 'center',
               fontVariantNumeric: 'tabular-nums',
             }}
           >
             {classifier.currentLetter || '·'}
           </div>
-          <div
-            style={{
-              flex: 1,
-              fontSize: 17,
-              fontWeight: 500,
-              color: 'var(--text-primary)',
-              minHeight: 26,
-              wordBreak: 'break-word',
-            }}
-          >
-            {spelledText || <span style={{ color: 'var(--text-muted)' }}>Spelled text appears here</span>}
+          <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+            Live letter
           </div>
         </div>
 
-        <p style={{ margin: '0 0 12px', fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4 }}>
-          Hold each letter ~2s · hand away ~2s for space · hand away ~4s to send
+        <p style={{ margin: '0 0 10px', fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4 }}>
+          Hold each letter ~2s. After 4s with no hand, the recognized text is sent automatically.
         </p>
 
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            type="button"
-            className="btn-secondary"
-            style={{ padding: '8px 14px', fontSize: 13 }}
-            onClick={() => {
-              setSpelledText('')
-              clearVoteWindow()
-            }}
-          >
-            Clear
-          </button>
-          <button type="button" className="btn-secondary" style={{ padding: '8px 14px', fontSize: 13 }} onClick={() => flushText()}>
-            Send now
-          </button>
-        </div>
+        <textarea
+          readOnly
+          rows={3}
+          className="input-surface transcript-mono"
+          aria-label="Recognized ASL letters"
+          placeholder="Recognized letters appear here"
+          value={spelledText}
+          style={{ fontSize: 16, lineHeight: 1.5, minHeight: 92 }}
+        />
       </div>
     </div>
   )

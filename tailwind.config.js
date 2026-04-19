@@ -3,13 +3,13 @@ export default {
   theme: {
     extend: {
       colors: {
-        bg: '#0A0A0F',
-        surface: '#12121A',
-        'surface-raised': '#1C1C28',
-        border: '#2A2A3E',
-        primary: '#6C63FF',
-        secondary: '#00D4AA',
-        danger: '#FF4D6A',
+        bg: '#050a12',
+        surface: '#0c1828',
+        'surface-raised': '#112536',
+        border: '#1e3a5c',
+        primary: '#38bdf8',
+        secondary: '#60a5fa',
+        danger: '#f472b6',
       },
     },
   },

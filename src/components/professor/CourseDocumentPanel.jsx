@@ -103,7 +103,7 @@ export default function CourseDocumentPanel() {
             minHeight: 220,
             borderRadius: 14,
             border: `2px dashed ${isDragging ? 'var(--primary)' : 'var(--border)'}`,
-            background: isDragging ? 'rgba(108,99,255,0.08)' : 'rgba(255,255,255,0.02)',
+            background: isDragging ? 'rgba(56,189,248,0.1)' : 'rgba(255,255,255,0.02)',
             color: 'var(--text-secondary)',
             display: 'grid',
             placeItems: 'center',

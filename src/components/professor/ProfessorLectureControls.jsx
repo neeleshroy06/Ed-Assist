@@ -17,7 +17,6 @@ const ProfessorLectureControls = forwardRef(function ProfessorLectureControls(
     processingError,
     processingNotice,
     runtimeStatus,
-    lectureMemoryCount,
     annotationCount,
     hideIdlePlaceholder,
   },
@@ -134,7 +133,7 @@ const ProfessorLectureControls = forwardRef(function ProfessorLectureControls(
         const barHeight = Math.max(10, value * height)
         const x = index * barWidth + 2
         const y = (height - barHeight) / 2
-        context.fillStyle = 'rgba(108, 99, 255, 0.85)'
+        context.fillStyle = 'rgba(56, 189, 248, 0.88)'
         context.fillRect(x, y, Math.max(barWidth - 4, 3), barHeight)
       }
 
@@ -201,7 +200,7 @@ const ProfessorLectureControls = forwardRef(function ProfessorLectureControls(
               padding: '10px 14px',
               borderRadius: 12,
               border: '1px solid var(--border)',
-              background: 'rgba(108,99,255,0.06)',
+              background: 'rgba(56,189,248,0.08)',
               minHeight: 56,
               display: 'flex',
               flexDirection: 'column',
@@ -280,7 +279,7 @@ const ProfessorLectureControls = forwardRef(function ProfessorLectureControls(
                 width: 36,
                 height: 36,
                 borderRadius: '50%',
-                border: '3px solid rgba(108,99,255,0.18)',
+                border: '3px solid rgba(56,189,248,0.22)',
                 borderTopColor: 'var(--primary)',
                 margin: '0 auto 12px',
               }}
@@ -294,7 +293,7 @@ const ProfessorLectureControls = forwardRef(function ProfessorLectureControls(
                   width: `${progress}%`,
                   height: '100%',
                   borderRadius: 999,
-                  background: 'linear-gradient(90deg, var(--primary), var(--secondary))',
+                  background: 'linear-gradient(90deg, var(--primary), var(--accent))',
                   transition: 'width 0.2s ease',
                 }}
               />
@@ -314,10 +313,10 @@ const ProfessorLectureControls = forwardRef(function ProfessorLectureControls(
               <p style={{ margin: '6px 0 0', color: 'var(--text-secondary)', fontSize: 13, maxWidth: 420 }}>
                 {lectureStatus === 'published'
                   ? runtimeStatus?.lectureMemoryMode === 'pending'
-                    ? `Students can open the annotated PDF now. Gemma 4 is building lecture memory from ${annotationCount} annotations.`
+                    ? `Students can open the annotated PDF now. Background enrichment is processing ${annotationCount} annotations.`
                     : runtimeStatus?.lectureMemoryMode === 'error'
-                      ? `The lecture package is live for students, but Gemma 4 memory is unavailable right now.`
-                      : `${lectureMemoryCount} memory ${lectureMemoryCount === 1 ? 'entry' : 'entries'} · ${annotationCount} annotations`
+                      ? 'The lecture package is live for students. Some background services are unavailable.'
+                      : `Published with ${annotationCount} slide ${annotationCount === 1 ? 'annotation' : 'annotations'}.`
                   : 'Review the transcript below.'}
               </p>
             </div>
@@ -333,9 +332,9 @@ const ProfessorLectureControls = forwardRef(function ProfessorLectureControls(
               />
               {lectureStatus === 'published'
                 ? runtimeStatus?.lectureMemoryMode === 'pending'
-                  ? 'Live for students · Building Gemma 4 memory'
+                  ? 'Live for students · Enrichment running'
                   : runtimeStatus?.lectureMemoryMode === 'error'
-                    ? 'Live for students · Gemma 4 unavailable'
+                    ? 'Live for students · Backend notice'
                     : 'Live for students'
                 : lectureStatus}
             </div>

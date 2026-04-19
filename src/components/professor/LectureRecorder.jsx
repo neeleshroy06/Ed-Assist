@@ -25,7 +25,6 @@ export default function LectureRecorder({
   onLectureStart,
   onLectureProcessed,
   processingError,
-  lectureMemoryCount,
   annotationCount,
   canStartLecture,
 }) {
@@ -68,7 +67,7 @@ export default function LectureRecorder({
         const barHeight = Math.max(10, value * height)
         const x = index * barWidth + 2
         const y = (height - barHeight) / 2
-        context.fillStyle = 'rgba(108, 99, 255, 0.85)'
+        context.fillStyle = 'rgba(56, 189, 248, 0.88)'
         context.fillRect(x, y, Math.max(barWidth - 4, 3), barHeight)
       }
 
@@ -246,13 +245,13 @@ export default function LectureRecorder({
                 width: 40,
                 height: 40,
                 borderRadius: '50%',
-                border: '3px solid rgba(108,99,255,0.18)',
+                border: '3px solid rgba(56,189,248,0.22)',
                 borderTopColor: 'var(--primary)',
                 margin: '0 auto 16px',
               }}
             />
             <p style={{ fontWeight: 600 }}>
-              {lectureStatus === 'processing' ? 'Generating lecture memory...' : 'Transcribing with ElevenLabs Scribe...'}
+              {lectureStatus === 'processing' ? 'Publishing lecture package…' : 'Transcribing with ElevenLabs Scribe...'}
             </p>
             <div style={{ marginTop: 20, height: 8, borderRadius: 999, background: 'rgba(255,255,255,0.05)' }}>
               <div
@@ -281,7 +280,7 @@ export default function LectureRecorder({
               </h2>
               <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: 13 }}>
                 {lectureStatus === 'published'
-                  ? `${lectureMemoryCount} lecture memory ${lectureMemoryCount === 1 ? 'entry' : 'entries'} generated from ${annotationCount} annotations.`
+                  ? `${annotationCount} slide ${annotationCount === 1 ? 'annotation' : 'annotations'} included in the published package.`
                   : 'Review the transcript before students receive the lecture package.'}
               </p>
             </div>

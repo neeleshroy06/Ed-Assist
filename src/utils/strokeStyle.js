@@ -11,7 +11,7 @@ export function strokeStyle(stroke) {
     }
   }
   return {
-    stroke: stroke?.color || '#6C63FF',
+    stroke: stroke?.color || '#38bdf8',
     strokeWidth: stroke?.width || 4,
     globalCompositeOperation: 'source-over',
   }

@@ -24,6 +24,21 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY
 const OLLAMA_URL = (process.env.OLLAMA_URL || 'http://localhost:11434').replace(/\/+$/, '')
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'gemma3:4b'
+/** Default HTTP timeout for Ollama /api/chat (chapter detection, short calls). */
+const OLLAMA_TIMEOUT_MS = Math.max(10000, Number(process.env.OLLAMA_TIMEOUT_MS) || 120000)
+/**
+ * Lecture memory sends a large prompt + JSON response; local models often need several minutes on CPU.
+ * Defaults to 10 minutes; set OLLAMA_LECTURE_MEMORY_TIMEOUT_MS to override (milliseconds).
+ */
+const OLLAMA_LECTURE_MEMORY_TIMEOUT_MS = Math.max(
+  OLLAMA_TIMEOUT_MS,
+  Number(process.env.OLLAMA_LECTURE_MEMORY_TIMEOUT_MS) || 600000,
+)
+const OLLAMA_LECTURE_MEMORY_RETRIES = Math.max(1, Number(process.env.OLLAMA_LECTURE_MEMORY_RETRIES) || 2)
+const OLLAMA_CHAPTER_TRANSCRIPT_CHARS = Math.max(2000, Number(process.env.OLLAMA_CHAPTER_TRANSCRIPT_CHARS) || 12000)
+const OLLAMA_MOMENT_TRANSCRIPT_CHARS = Math.max(120, Number(process.env.OLLAMA_MOMENT_TRANSCRIPT_CHARS) || 320)
+const OLLAMA_ANNOTATION_CHARS = Math.max(120, Number(process.env.OLLAMA_ANNOTATION_CHARS) || 240)
+const OLLAMA_NEARBY_TEXT_ITEMS = Math.max(2, Number(process.env.OLLAMA_NEARBY_TEXT_ITEMS) || 4)
 const SERVER_STARTED_AT = new Date().toISOString()
 const SERVER_PID = process.pid
 const GEMINI_LIVE_WS_URL =
@@ -164,7 +179,7 @@ function messageFromUpstream(error) {
  * `ollama pull <OLLAMA_MODEL>` so the model is available. Returns the raw assistant
  * text content. When `json: true`, asks Ollama to constrain output to valid JSON.
  */
-async function callOllama(prompt, { json = false, system = '', temperature = 0.2 } = {}) {
+async function callOllama(prompt, { json = false, system = '', temperature = 0.2, timeout } = {}) {
   const messages = []
   if (system) messages.push({ role: 'system', content: system })
   messages.push({ role: 'user', content: prompt })
@@ -177,9 +192,11 @@ async function callOllama(prompt, { json = false, system = '', temperature = 0.2
   }
   if (json) body.format = 'json'
 
+  const ms = typeof timeout === 'number' && timeout > 0 ? timeout : OLLAMA_TIMEOUT_MS
+
   const response = await axios.post(`${OLLAMA_URL}/api/chat`, body, {
     headers: { 'Content-Type': 'application/json' },
-    timeout: 120000,
+    timeout: ms,
   })
   return String(response.data?.message?.content || '').trim()
 }
@@ -188,6 +205,12 @@ function sleep(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms)
   })
+}
+
+function clipText(value, maxChars) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  if (!text || text.length <= maxChars) return text
+  return `${text.slice(0, Math.max(1, maxChars - 1)).trim()}…`
 }
 
 function execFileAsync(file, args, options = {}) {
@@ -546,7 +569,7 @@ function attachTranscriptToMoments(moments = [], transcriptSegments = []) {
     const excerpt = overlapping.map((segment) => segment.text).join(' ').trim()
     return {
       ...moment,
-      transcript: excerpt,
+      transcript: clipText(excerpt, OLLAMA_MOMENT_TRANSCRIPT_CHARS),
     }
   })
 }
@@ -555,6 +578,14 @@ async function generateLectureMemoryWithGemma(moments = [], transcript = '') {
   if (!moments.length) {
     return { entries: [], mode: 'idle', warning: '', error: '' }
   }
+
+  const compactMoments = moments.map((moment) => ({
+    timestamp: moment.timestamp,
+    page: moment.page,
+    annotation: clipText(moment.annotation, OLLAMA_ANNOTATION_CHARS),
+    nearbyText: Array.isArray(moment.nearbyText) ? moment.nearbyText.filter(Boolean).slice(0, OLLAMA_NEARBY_TEXT_ITEMS) : [],
+    transcript: clipText(moment.transcript, OLLAMA_MOMENT_TRANSCRIPT_CHARS),
+  }))
 
   const prompt = `You are converting a lecture transcript plus timestamped document annotations into structured lecture memory.
 
@@ -566,27 +597,19 @@ Return ONLY a JSON object of the form { "entries": [ ... ] } where each entry ha
 - summary (one sentence explaining what the professor was likely emphasizing at that moment)
 
 Do not invent details beyond the transcript and annotation context. Output one entry per input moment, in the same order.
-
-Lecture transcript:
-${transcript.slice(0, 24000)}
+Each input moment already includes the relevant local transcript excerpt, so do not expect the full lecture transcript.
 
 Annotation moments:
 ${JSON.stringify(
-    moments.map((moment) => ({
-      timestamp: moment.timestamp,
-      page: moment.page,
-      annotation: moment.annotation,
-      nearbyText: moment.nearbyText,
-      transcript: moment.transcript,
-    })),
+    compactMoments,
     null,
     2,
   )}`
 
   let lastError = ''
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  for (let attempt = 1; attempt <= OLLAMA_LECTURE_MEMORY_RETRIES; attempt += 1) {
     try {
-      const raw = await callOllama(prompt, { json: true })
+      const raw = await callOllama(prompt, { json: true, timeout: OLLAMA_LECTURE_MEMORY_TIMEOUT_MS })
       const parsed = parseJsonCandidate(raw, null)
       const entries = Array.isArray(parsed)
         ? parsed
@@ -617,7 +640,7 @@ ${JSON.stringify(
       lastError = error?.message || `Gemma 4 request failed on attempt ${attempt}.`
     }
 
-    if (attempt < 3) {
+    if (attempt < OLLAMA_LECTURE_MEMORY_RETRIES) {
       await sleep(attempt * 1200)
     }
   }
@@ -655,7 +678,7 @@ async function detectChaptersAsync(transcript) {
       `Analyze this lecture transcript and return ONLY a JSON object of the form { "chapters": [ "name 1", "name 2", ... ] } with 4 to 8 concise chapter or topic names. No markdown, no extra text.
 
 Transcript:
-${transcript.slice(0, 50000)}`,
+${clipText(transcript, OLLAMA_CHAPTER_TRANSCRIPT_CHARS)}`,
       { json: true },
     )
 

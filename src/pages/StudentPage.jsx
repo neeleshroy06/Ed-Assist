@@ -11,14 +11,14 @@ import { GeminiLiveDocumentProvider, useGeminiLiveDocumentContext } from '../con
 
 function StudentPageContent() {
   const live = useGeminiLiveDocumentContext()
-  const { sendAudioStreamEnd, lectureMemory = [], annotationEvents = [] } = live
+  const { sendAudioStreamEnd, annotationEvents = [] } = live
   const [inputMode, setInputMode] = useState('voice')
   const [isMicMuted, setIsMicMuted] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
   const [audioLevel, setAudioLevel] = useState(0.2)
   const documentViewerRef = useRef(null)
   const sessionActive = live.status === 'live'
-  const hasLectureContext = lectureMemory.length > 0 || annotationEvents.length > 0
+  const hasPublishedDeck = annotationEvents.length > 0
 
   const orbState = useMemo(() => {
     if (live.status !== 'live') return 'idle'
@@ -122,6 +122,18 @@ function StudentPageContent() {
           >
             <ASLCamera
               active={inputMode === 'asl'}
+              sessionState={voiceSessionState}
+              onStartSession={async () => {
+                setIsPaused(false)
+                setIsMicMuted(true)
+                await live.preparePlayback()
+                await live.startLive()
+              }}
+              onEndSession={() => {
+                live.stopLive()
+                setIsMicMuted(false)
+                setIsPaused(false)
+              }}
               onSpelledWord={(text) => {
                 live.sendText(text)
               }}
@@ -129,40 +141,42 @@ function StudentPageContent() {
           </div>
         )}
 
-        <div style={{ marginTop: inputMode === 'voice' ? 20 : 14, position: 'relative', zIndex: 10, flexShrink: 0 }}>
-          <VoiceControls
-            isMicMuted={isMicMuted}
-            onMicToggle={() =>
-              setIsMicMuted((value) => {
-                if (!value && live.status === 'live') {
-                  live.sendAudioStreamEnd()
-                }
-                return !value
-              })
-            }
-            isPaused={isPaused}
-            onPauseToggle={async () => {
-              if (isPaused) {
-                await live.resumeAssistantAudio()
-              } else {
-                live.pauseAssistantAudio()
+        {inputMode === 'voice' && (
+          <div style={{ marginTop: 20, position: 'relative', zIndex: 10, flexShrink: 0 }}>
+            <VoiceControls
+              isMicMuted={isMicMuted}
+              onMicToggle={() =>
+                setIsMicMuted((value) => {
+                  if (!value && live.status === 'live') {
+                    live.sendAudioStreamEnd()
+                  }
+                  return !value
+                })
               }
-              setIsPaused((value) => !value)
-            }}
-            onEndSession={() => {
-              live.stopLive()
-              setIsMicMuted(false)
-              setIsPaused(false)
-            }}
-            sessionState={voiceSessionState}
-            onStartSession={async () => {
-              setIsPaused(false)
-              setIsMicMuted(false)
-              await live.preparePlayback()
-              await live.startLive()
-            }}
-          />
-        </div>
+              isPaused={isPaused}
+              onPauseToggle={async () => {
+                if (isPaused) {
+                  await live.resumeAssistantAudio()
+                } else {
+                  live.pauseAssistantAudio()
+                }
+                setIsPaused((value) => !value)
+              }}
+              onEndSession={() => {
+                live.stopLive()
+                setIsMicMuted(false)
+                setIsPaused(false)
+              }}
+              sessionState={voiceSessionState}
+              onStartSession={async () => {
+                setIsPaused(false)
+                setIsMicMuted(false)
+                await live.preparePlayback()
+                await live.startLive()
+              }}
+            />
+          </div>
+        )}
 
         {(live.error || micStream.error) && <p style={{ color: 'var(--danger)', fontSize: 13, marginTop: 12 }}>{live.error || micStream.error}</p>}
         {live.status === 'connecting' && (
@@ -178,21 +192,21 @@ function StudentPageContent() {
         )}
         {live.runtimeStatus?.lectureMemoryMode === 'pending' && (
           <p style={{ color: 'var(--amber)', fontSize: 12, marginTop: 8 }}>
-            The annotated PDF is ready. Gemma 4 is still building lecture memory in the background, so annotation answers will get better once it finishes.
+            The annotated PDF is ready. Background enrichment is still running—answers will improve shortly.
           </p>
         )}
         {live.runtimeStatus?.lectureMemoryMode === 'error' && (
           <p style={{ color: 'var(--amber)', fontSize: 12, marginTop: 8 }}>
-            Gemma 4 lecture memory is currently unavailable. The student can still ask about the document and annotations, but answers will stay document-grounded until Gemma 4 is healthy again.
+            Some background services are unavailable. You can still ask about the document and slide marks.
           </p>
         )}
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12, flexWrap: 'wrap', justifyContent: 'center' }}>
           <span
             title={
-              hasLectureContext
-                ? `Grounded in ${lectureMemory.length} lecture memory ${lectureMemory.length === 1 ? 'entry' : 'entries'} and ${annotationEvents.length} professor annotations. Click any highlighted region in the slides to ask about it.`
-                : 'No lecture has been published yet — answers will be grounded in the raw document only.'
+              hasPublishedDeck
+                ? `${annotationEvents.length} professor marks on the slides. Click a highlighted region to ask about it.`
+                : 'No lecture has been published yet — answers will follow the document text only.'
             }
             style={{
               display: 'inline-flex',
@@ -204,9 +218,9 @@ function StudentPageContent() {
               fontWeight: 600,
               letterSpacing: '0.06em',
               textTransform: 'uppercase',
-              border: `1px solid ${hasLectureContext ? 'rgba(108,99,255,0.45)' : 'var(--border)'}`,
-              background: hasLectureContext ? 'rgba(108,99,255,0.12)' : 'rgba(255,255,255,0.04)',
-              color: hasLectureContext ? 'var(--primary)' : 'var(--text-muted)',
+              border: `1px solid ${hasPublishedDeck ? 'rgba(56,189,248,0.45)' : 'var(--border)'}`,
+              background: hasPublishedDeck ? 'rgba(56,189,248,0.12)' : 'rgba(56,189,248,0.04)',
+              color: hasPublishedDeck ? 'var(--primary)' : 'var(--text-muted)',
             }}
           >
             <span
@@ -214,13 +228,13 @@ function StudentPageContent() {
                 width: 6,
                 height: 6,
                 borderRadius: '50%',
-                background: hasLectureContext ? 'var(--primary)' : 'var(--text-muted)',
+                background: hasPublishedDeck ? 'var(--primary)' : 'var(--text-muted)',
               }}
             />
             {live.runtimeStatus?.lectureMemoryMode === 'pending'
-              ? `Gemma 4 pending · ${annotationEvents.length} annotations`
-              : hasLectureContext
-                ? `Lecture memory: ${lectureMemory.length} · ${annotationEvents.length} annotations`
+              ? `Enriching · ${annotationEvents.length} slide marks`
+              : hasPublishedDeck
+                ? `${annotationEvents.length} slide marks`
                 : 'Document only (no lecture published)'}
           </span>
         </div>
